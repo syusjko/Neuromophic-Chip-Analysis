@@ -28,23 +28,54 @@
 module metacognition #(
     parameter [3:0] EXPLOIT_THR    = 4'd6,
     parameter [3:0] EXPLORE_THR    = 4'd5,
-    parameter [1:0] CONF_EXP_THR   = 2'd2   // 2D: str≤THR AND conf≤CONF → explore
+    parameter [1:0] CONF_EXP_THR   = 2'd2,
+    // V3.7: err 기반 explore 강제
+    parameter [7:0] ERR_HIGH_THR   = 8'd50,  // 이 이상이면 "예측 실패"
+    parameter [7:0] ERR_FORCE_WIN  = 8'd5    // 연속 N gamma → explore 강제
 )(
     input  wire       clk,
     input  wire       rst_n,
     input  wire       theta_tick,
     input  wire [3:0] ep_strength,
     input  wire       ep_valid,
+    input  wire [7:0] pred_err,
+    input  wire       cyc_start,
+    input  wire       input_mismatch,  // V3.7b: 입력 패턴 불일치 (조기 감지)
 
     output reg        exploit_mode,
-    output wire       explore_mode,    // combinational: 즉시 반영
-    output reg [1:0]  confidence_level
+    output wire       explore_mode,
+    output reg [1:0]  confidence_level,
+    output wire       err_explore    // V3.7: err 기반 탐색 신호 (별도 관찰용)
 );
-    // explore_mode: combinational (타이밍 지연 없음)
-    // confidence_level이 업데이트되면 즉시 explore_mode도 변경
-    assign explore_mode = ep_valid &&
-                          (ep_strength <= EXPLORE_THR) &&
-                          (confidence_level <= CONF_EXP_THR);
+    // -------------------------------------------------------------------------
+    // V3.7: pred_err 기반 explore 강제 카운터
+    // "예측이 N 사이클 연속으로 크게 틀리면 현재 문맥을 의심하라"
+    // -------------------------------------------------------------------------
+    reg [7:0] err_high_cnt;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            err_high_cnt <= 8'd0;
+        end
+        else if (cyc_start) begin
+            if (pred_err > ERR_HIGH_THR) begin
+                if (err_high_cnt < ERR_FORCE_WIN)
+                    err_high_cnt <= err_high_cnt + 8'd1;
+            end
+            else begin
+                err_high_cnt <= 8'd0;  // 오차 낮아지면 카운터 리셋
+            end
+        end
+    end
+
+    wire err_forced = (err_high_cnt >= ERR_FORCE_WIN);
+
+    // explore_mode: 에피소드 불안정 OR 예측 오류 OR 입력 불일치
+    assign err_explore  = err_forced;
+    assign explore_mode = err_forced ||
+                          input_mismatch ||           // V3.7b: 즉시 감지
+                          (ep_valid &&
+                           (ep_strength   <= EXPLORE_THR) &&
+                           (confidence_level <= CONF_EXP_THR));
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -58,9 +89,9 @@ module metacognition #(
             end
             else if (ep_strength <= EXPLORE_THR) begin
                 if (confidence_level == 2'd3)
-                    confidence_level <= 2'd2;  // 확신→전환중 (한 단계씩)
+                    confidence_level <= 2'd2;
                 else
-                    confidence_level <= 2'd1;  // 탐색
+                    confidence_level <= 2'd1;
                 exploit_mode <= 1'b0;
             end
             else begin

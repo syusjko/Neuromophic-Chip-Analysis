@@ -42,15 +42,24 @@ module tb_pst_brain_v2;
     wire [2:0] ep_win;
     wire [3:0] ep_str;
     wire       ep_v;
-    wire       exploit_s;    // V3.3
-    wire       explore_s;    // V3.3
-    wire [1:0] conf_lv;      // V3.3
+    wire       exploit_s;
+    wire       explore_s;
+    wire [1:0] conf_lv;
+    wire       err_exp;      // V3.7: err 기반 explore 신호
+    // V3.4: Delta
+    wire [2:0] th_cnt;     // theta_cnt (delta 내 theta 위치)
+    wire       d_tick;     // delta_tick
+    wire [2:0] top_win;    // topic_winner
+    wire [2:0] top_str;    // topic_strength
+    wire       top_v;      // topic_valid
 
-    // theta 로깅 (메타인지 포함)
     always @(posedge clk) begin
         if (th_tick)
-            $display("  [THETA] ep=%0d str=%0d/8 conf=%0d expl=%0d cyc=%0d",
-                ep_win, ep_str, conf_lv, explore_s, cyc_cnt);
+            $display("  [THETA] ep=%0d str=%0d/8 conf=%0d expl=%0d err_exp=%0d th=%0d cyc=%0d",
+                ep_win, ep_str, conf_lv, explore_s, err_exp, th_cnt, cyc_cnt);
+        if (d_tick)
+            $display("  [DELTA] topic=%0d tstr=%0d/5 cyc=%0d",
+                top_win, top_str, cyc_cnt);
     end
 
     pst_brain_v2 #(
@@ -83,7 +92,13 @@ module tb_pst_brain_v2;
         .ep_valid(ep_v),
         .exploit_mode(exploit_s),
         .explore_mode(explore_s),
-        .confidence_level(conf_lv)
+        .confidence_level(conf_lv),
+        .theta_cnt(th_cnt),
+        .delta_tick(d_tick),
+        .topic_winner(top_win),
+        .topic_strength(top_str),
+        .topic_valid(top_v),
+        .err_explore(err_exp)
     );
 
     // X 감지
@@ -105,11 +120,17 @@ module tb_pst_brain_v2;
 
     task show;
         input integer c;
+        reg [7:0] eb, tb;
         begin
-            $display("[C%3d] win=%0d sc=%0d rel=%0d | wAB=%0d wCD=%0d | pred=%0d err=%0d fv=%0d rwd=%0d",
-                c, w_att, w_score, w_rel,
+            // ep_bias: explore=0, ep_valid, ep_winner==현재 winner
+            eb = (!explore_s && ep_v  && (ep_win  == w_att)) ? 8'd4 : 8'd0;
+            // topic_bias: explore=0, topic_valid, topic_winner==현재 winner
+            tb = (!explore_s && top_v && (top_win == w_att)) ? 8'd2 : 8'd0;
+            $display("[C%3d] win=%0d sc=%0d | wAB=%0d wCD=%0d | ep=%0d(+%0d) top=%0d(+%0d) exl=%0d | err=%0d rwd=%0d",
+                c, w_att, w_score,
                 wab, wcd,
-                p_out, p_err, fv, reward_sig);
+                ep_win, eb, top_win, tb, explore_s,
+                p_err, reward_sig);
         end
     endtask
 
@@ -265,12 +286,16 @@ module tb_pst_brain_v2;
         // A/B 경계값: winner가 자주 바뀜 → str ≤ 5 → expl=1 기대
         // =====================================================================
         $display("\n=== [Phase 6] Ambiguous Boundary → explore_mode test ===");
-        $display("  Input: A/B hybrid (cur0=130 cur1=120 cur2=125 cur3=115)");
-        $display("  기대: str<=5, conf<=2 → expl=1 → ctx_gate=1 → w=0 제거");
-        cur0=130; cur1=120; cur2=125; cur3=115;
+        $display("  Input: A/B 4-cycle alternating (빠른 교번으로 str 낮추기)");
+        $display("  기대: str<=5 → conf↓ → expl=1 → bias 제거");
         for (i=0; i<32; i=i+1) begin
+            // 4사이클 A, 4사이클 B 고속 교번
+            if ((i/4)%2 == 0) begin
+                cur0=200; cur1=180; cur2=5; cur3=8;
+            end else begin
+                cur0=5; cur1=8; cur2=200; cur3=180;
+            end
             tick;
-            // 매 8사이클(거의 1 theta)마다 상태 확인
             if (i==7 || i==15 || i==23 || i==31) begin
                 $display("  [Amb C%0d] win=%0d str=%0d conf=%0d expl=%0d sc=%0d wAB=%0d wCD=%0d",
                     cyc_cnt, w_att, ep_str, conf_lv, explore_s,

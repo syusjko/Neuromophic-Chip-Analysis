@@ -7,42 +7,46 @@
 ## 0. 핵심 성과 요약
 
 ```
-달성 모듈:
-  phase_stdp.v         STDP 시냅스 학습 검증                       ✅
-  predictive_phase.v   예측 코딩 핵심 회로                         ✅
-  pst_2layer.v         2층 계층적 학습                             ✅
-  seq2_predictor.v     WTA + top-down injection                    ✅
-  pst_brain_v1.v       완전한 폐루프 Brain v1                      ✅
-  pst_brain_v2.v       Brain V3.3 - 자율 메타인지 뇌               ✅ 최종
-  theta_oscillator.v   8 gamma = 1 에피소드 경계                   ✅
-  episode_memory.v     에피소드 투표 → ep_winner/strength          ✅
-  metacognition.v      2D 메타인지 (explore/exploit 자동 전환)     ✅
+달성 모듈 (2026-02-22 V3.8b 최종):
+  phase_stdp.v         STDP v3.8 (global protect)               ✅
+  predictive_phase.v   예측 코딩 핵심 회로                      ✅
+  pst_brain_v1.v       완전한 폐루프 Brain v1                   ✅
+  pst_brain_v2.v       Brain V3.8b - 전체 6 Phase 완전 증명     ✅ 최종
+  theta_oscillator.v   8 gamma = 1 에피소드                     ✅
+  episode_memory.v     에피소드 투표 → ep_winner/strength       ✅
+  metacognition.v      3중 explore: ep불안정+err급증+입력불일치  ✅
+  delta_oscillator.v   5 theta = 1 delta (대화 주제 경계)       ✅
+  topic_memory.v       delta 안정 투표 → topic_winner           ✅
 
-핵심 증명 (2026-02-20):
-  1. 단층 STDP 한계 극복: 예측 코딩으로 해결
-  2. 계층적 학습 66% 가속 (4 vs 12 gamma cycles)
-  3. 폐루프 Brain v1: attention → STDP → seq2 → injection 전체 동작
-  4. Brain v2.3 5대 기능:
-     [경험→지각]  학습 전 2/20 → 학습 후 20/20
-     [R-STDP]    err<5 → reward=1 → LTP×2 (C50에서 w=190, 이전 160)
-     [Trans A↔B] 양방향 전換 성공 (2-3γ)
-     [Homeostasis] 100사이클 후 BALANCED (189)
-     [Context Gating] fv=1 또는 explore=1 → score=rel/2 (w=0)
-  5. Brain V3.3 메타인지 완전 동작:
-     [Theta]      8 gamma = 1 에피소드 (cyc=8,16,24... 정확히 발생)
-     [Ep Memory]  str=8/8(독점) → str=4/8(경쟁) 실시간 감지
-     [Metacog]    2D: (str≤5) AND (conf≤2) → explore=1 ✅
-     [자율루프]   A/B교번 → str↓ → conf↓ → expl=1 → 선입견 제거
-                  재안정 → str↑ → expl=0 → exploit 복귀
-     증명: [Alt C289] conf=2, expl=1 (ACTIVATED)
-           [Phase5] str=8/8 → conf=3, expl=0 (자동 복귀)
+[6 Phase 완전 성공 로드맵]
+  Phase 0  학습 전:   AB 2/20 (편견 없음)
+  Phase 1  A 학습:    wAB=190 ← expl=1→0 자동 전환
+  Phase 2  경험지각:  AB 20/20 ← "경험이 지각을 바꿈" ✅
+  Phase 3  B 학습:    wAB=185 wCD=190 gap=5 ← CF 없음! ✅
+  Phase 4  전환:      wAB=190 wCD=185 양쪽 복구
+  Phase 5  장기:      wAB=190 wCD=181 양쪽 보존 ✅
+  Phase 5.5 교번:     conf=3→1, expl=1, sc=127 ✅
+  Phase 6  경계:      conf=3→1, expl=1, gap=3, ACTIVATED ✅
 
-최종 확정 파라미터 (pst_brain_v2 V3.3):
-  ETA_LTP=4, ETA_LTD=2, W_MAX=190, W_MIN=80, DECAY_PERIOD=2
-  ERR_THR=5 (reward 조건), ERR_WIN=3 (연속 N사이클)
+핵심 증명 (2026-02-22 최종):
+  1. 경험 기반 지각:    2/20 → 20/20
+  2. R-STDP:           err<5 → reward → LTP×2
+  3. 3계층 시간:        γ→θ→δ (비율 40:5:1)
+  4. 2계층 문맥 bias:  ep+4, topic+2 → sc=133
+  5. Metacognition:    교번→expl=1→bias 제거→재안정→expl=0
+  6. CF 완전 극복:     [B50] gap 35→5 (86%↓), 장기 wCD=181 유지
+  7. 패턴 전환 자기인식: mismatch_ctx→expl=1 즉각 발동
+  8. 경계 유연성:      30사이클 교번→conf=1 expl=1 ✅
+
+최종 확정 파라미터 (V3.8b):
+  ETA_LTP=4, ETA_LTD=2, DECAY_PERIOD=2, W_MAX=190, W_MIN=80
+  EP_BIAS=4, TOPIC_BIAS=2, TOPIC_STAB_THR=3
+  MISMATCH_DIF=20, STABLE_WIN=10, MISMATCH_CTX=40
   EXPLOIT_THR=6, EXPLORE_THR=5, CONF_EXP_THR=2
-  score = rel/2 + w/4  (평소)
-  score = rel/2        (fv=1 또는 explore=1 → 선입견 제거)
+
+  protect  = topic_valid && !explore          (전역 decay+LTD 차단)
+  ctx_gate = fv | explore | mismatch_ctx      (w bias 즉각 제거)
+  score    = rel/2+w/4+ep+top (안정) / rel/2 (전환)
 ```
 
 ---
